@@ -1,0 +1,19 @@
+# kernel build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+*.dtbo
+Module.symvers
+modules.order
+.tmp_versions/
+
+# debian build artifacts
+debian/fysetc-5inch-dsi-touch/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+dist/

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    rm -f /etc/kernel/header_postinst.d/fysetc-touch \
+          /etc/kernel/postinst.d/fysetc-touch \
+          /etc/kernel/postrm.d/fysetc-touch
+fi
+
+#DEBHELPER#

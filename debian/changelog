@@ -1,0 +1,5 @@
+fysetc-5inch-dsi-touch (0.1.0) bookworm; urgency=medium
+
+  * Initial release: fysetc_touch driver, kernel hooks and edt_ft5x06 blacklist.
+
+ -- kkobold <sabbaghdanilo@gmail.com>  Mon, 05 Oct 2026 12:00:00 -0300

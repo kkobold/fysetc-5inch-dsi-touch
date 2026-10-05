@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+HOOKS="/etc/kernel/header_postinst.d /etc/kernel/postinst.d /etc/kernel/postrm.d"
+
+if [ "$1" = "configure" ]; then
+    for d in $HOOKS; do
+        mkdir -p "$d"
+        ln -sf /usr/lib/fysetc-touch/kernel-hook "$d/fysetc-touch"
+    done
+
+    fysetc-touch-build build
+
+    # Switch drivers without a reboot when the screen is already present.
+    if lsmod | grep -q '^edt_ft5x06 '; then
+        modprobe -r edt_ft5x06 || true
+    fi
+    modprobe fysetc_touch 2>/dev/null || true
+
+    CONFIG=/boot/firmware/config.txt
+    [ -f "$CONFIG" ] || CONFIG=/boot/config.txt
+    if [ -f "$CONFIG" ] && grep -v '^[[:space:]]*#' "$CONFIG" |
+        grep -Eq 'dtoverlay=(vc4-fkms-v3d|rpi-ft5406)|disable_touch([^s]|$)'; then
+        echo "fysetc-5inch-dsi-touch: WARNING: $CONFIG uses vc4-fkms-v3d, rpi-ft5406 or disable_touch."
+        echo "fysetc-5inch-dsi-touch: the driver needs vc4-kms-v3d + vc4-kms-dsi-7inch (without disable_touch)."
+        echo "fysetc-5inch-dsi-touch: see /usr/share/doc/fysetc-5inch-dsi-touch/README.md"
+    fi
+fi
+
+#DEBHELPER#

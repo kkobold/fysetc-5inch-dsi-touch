@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+PKG := fysetc-5inch-dsi-touch
+DEST := debian/$(PKG)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_clean:
+
+override_dh_auto_install:
+	install -D -m 0644 src/fysetc_touch.c $(DEST)/usr/src/fysetc-touch/fysetc_touch.c
+	install -D -m 0644 src/Makefile $(DEST)/usr/src/fysetc-touch/Makefile
+	install -D -m 0755 packaging/fysetc-touch-build $(DEST)/usr/sbin/fysetc-touch-build
+	install -D -m 0755 packaging/kernel-hook $(DEST)/usr/lib/fysetc-touch/kernel-hook
+	install -D -m 0644 modprobe/fysetc-touch.conf $(DEST)/lib/modprobe.d/fysetc-touch.conf

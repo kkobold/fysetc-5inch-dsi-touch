@@ -1,0 +1,10 @@
+#!/bin/sh
+# Kernel hook for fysetc-5inch-dsi-touch. Installed as a symlink in
+# /etc/kernel/{header_postinst.d,postinst.d,postrm.d}; $1 is the kernel version.
+[ -x /usr/sbin/fysetc-touch-build ] || exit 0
+[ -n "${1:-}" ] || exit 0
+
+case "$0" in
+    */postrm.d/*) exec /usr/sbin/fysetc-touch-build remove "$1" ;;
+    *)            exec /usr/sbin/fysetc-touch-build build "$1" ;;
+esac

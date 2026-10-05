@@ -1,0 +1,105 @@
+#!/bin/sh
+# Builds and installs the fysetc_touch module for Raspberry Pi kernels.
+#
+#   fysetc-touch-build build [KVER...]   build for KVER (default: every
+#                                        installed Raspberry Pi kernel)
+#   fysetc-touch-build remove [KVER...]  remove the module (default: all)
+#   fysetc-touch-build status            show where the module is installed
+#
+# Never exits with an error from build/remove: a failed build must not break
+# apt. Failures are reported on stderr and logged in /var/log/fysetc-touch/.
+set -u
+
+SRC=/usr/src/fysetc-touch
+MODDIR=updates/fysetc_touch
+LOGDIR=/var/log/fysetc-touch
+
+log() { echo "fysetc-touch: $*" >&2; }
+
+is_rpi_kernel() {
+    case "$1" in
+        *+rpt-rpi-*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+rpi_kernels() {
+    for d in /lib/modules/*; do
+        k=${d##*/}
+        is_rpi_kernel "$k" && echo "$k"
+    done
+}
+
+build_one() {
+    kver=$1
+    if ! is_rpi_kernel "$kver"; then
+        return 0
+    fi
+    if [ ! -e "/lib/modules/$kver/build/Makefile" ]; then
+        log "no headers for $kver, skipped"
+        return 0
+    fi
+
+    tmp=$(mktemp -d) || return 0
+    cp "$SRC"/fysetc_touch.c "$SRC"/Makefile "$tmp"/
+    if make -C "/lib/modules/$kver/build" M="$tmp" modules >"$tmp/make.log" 2>&1; then
+        install -D -m 0644 "$tmp/fysetc_touch.ko" "/lib/modules/$kver/$MODDIR/fysetc_touch.ko"
+        depmod -a "$kver"
+        log "built for $kver"
+    else
+        mkdir -p "$LOGDIR"
+        cp "$tmp/make.log" "$LOGDIR/build-$kver.log"
+        log "build FAILED for $kver, see $LOGDIR/build-$kver.log"
+    fi
+    rm -rf "$tmp"
+    return 0
+}
+
+remove_one() {
+    kver=$1
+    if [ -d "/lib/modules/$kver/$MODDIR" ]; then
+        rm -rf "/lib/modules/$kver/$MODDIR"
+        rmdir --ignore-fail-on-non-empty "/lib/modules/$kver/updates" 2>/dev/null || true
+        [ -d "/lib/modules/$kver/kernel" ] && depmod -a "$kver"
+        log "removed from $kver"
+    fi
+    rm -f "$LOGDIR/build-$kver.log"
+    return 0
+}
+
+cmd=${1:-status}
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+    build)
+        [ $# -eq 0 ] && set -- $(rpi_kernels)
+        for k in "$@"; do build_one "$k"; done
+        ;;
+    remove)
+        if [ $# -eq 0 ]; then
+            set -- $(ls /lib/modules)
+        fi
+        for k in "$@"; do remove_one "$k"; done
+        rmdir "$LOGDIR" 2>/dev/null || true
+        ;;
+    status)
+        for k in $(rpi_kernels); do
+            if [ -f "/lib/modules/$k/$MODDIR/fysetc_touch.ko" ]; then
+                s=installed
+            elif [ -f "$LOGDIR/build-$k.log" ]; then
+                s="build failed ($LOGDIR/build-$k.log)"
+            elif [ ! -e "/lib/modules/$k/build/Makefile" ]; then
+                s="no headers"
+            else
+                s="not built"
+            fi
+            [ "$k" = "$(uname -r)" ] && k="$k (running)"
+            echo "$k: $s"
+        done
+        ;;
+    *)
+        echo "usage: fysetc-touch-build build|remove [KVER...] | status" >&2
+        exit 2
+        ;;
+esac
+exit 0

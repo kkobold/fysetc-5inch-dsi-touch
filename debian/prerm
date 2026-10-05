@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ]; then
+    modprobe -r fysetc_touch 2>/dev/null || true
+    fysetc-touch-build remove
+fi
+
+#DEBHELPER#

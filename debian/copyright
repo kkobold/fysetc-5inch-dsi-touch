@@ -6,9 +6,20 @@ Files: *
 Copyright: 2026 kkobold
 License: MIT
 
-Files: src/*.c
-Copyright: 2026 kkobold
-License: GPL-2.0 or MIT
+Files: src/fysetc_touch.c
+Copyright: 2015, 2017 Raspberry Pi
+           2018 Nicolas Saenz Julienne <nsaenzjulienne@suse.de>
+           2026 kkobold
+License: GPL-2.0
+Comment: Based on drivers/input/touchscreen/raspberrypi-ts.c from the
+ Raspberry Pi Linux kernel (rpi-6.12.y).
+
+Files: src/fysetc_sleep.c
+Copyright: 2020 Marek Vasut <marex@denx.de>
+           2026 kkobold
+License: GPL-2.0
+Comment: Modified copy of drivers/regulator/rpi-panel-attiny-regulator.c
+ from the Raspberry Pi Linux kernel (rpi-6.12.y).
 
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy

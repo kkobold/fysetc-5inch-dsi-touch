@@ -11,11 +11,25 @@ if [ "$1" = "configure" ]; then
 
     fysetc-touch-build build
 
+    # The blacklist must reach the initramfs of every installed kernel:
+    # Raspberry Pi OS packs rpi_panel_attiny_regulator into it. A failure only
+    # warns: blocking would stop every later apt run, while the worst case is
+    # the stock driver loading from the old initramfs (the screen may stay dark
+    # after sleep).
+    if command -v update-initramfs >/dev/null 2>&1 && ! update-initramfs -u -k all; then
+        echo "fysetc-5inch-dsi-touch: WARNING: update-initramfs failed; fix the cause (for example, a full /boot), then run 'sudo update-initramfs -u -k all' and reboot." >&2
+    fi
+
     # Switch drivers without a reboot when the screen is already present.
     if lsmod | grep -q '^edt_ft5x06 '; then
         modprobe -r edt_ft5x06 || true
     fi
     modprobe fysetc_touch 2>/dev/null || true
+
+    # The panel controller powers the display, so it is not swapped live.
+    if lsmod | grep -q '^rpi_panel_attiny_regulator '; then
+        echo "fysetc-5inch-dsi-touch: reboot to switch the panel controller to fysetc_sleep."
+    fi
 
     CONFIG=/boot/firmware/config.txt
     [ -f "$CONFIG" ] || CONFIG=/boot/config.txt

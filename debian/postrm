@@ -7,4 +7,13 @@ if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
           /etc/kernel/postrm.d/fysetc-touch
 fi
 
+# The blacklist is gone: drop it from the initramfs of every installed kernel.
+# A failure only warns: blocking the removal would leave the package half
+# removed, and the stock drivers stay blacklisted only until the initramfs is
+# regenerated.
+if [ "$1" = "remove" ] && command -v update-initramfs >/dev/null 2>&1 &&
+    ! update-initramfs -u -k all; then
+    echo "fysetc-5inch-dsi-touch: WARNING: update-initramfs failed; run 'sudo update-initramfs -u -k all' and reboot." >&2
+fi
+
 #DEBHELPER#

@@ -8,18 +8,21 @@ Homepage: https://github.com/kkobold/fysetc-5inch-dsi-touch
 Rules-Requires-Root: no
 
 Package: fysetc-5inch-dsi-touch
-Architecture: all
+Architecture: arm64
 Depends: ${misc:Depends}, linux-headers-rpi-v8, linux-headers-rpi-2712, make, kmod
-Description: Touch driver for the FYSETC Raspberry Pi 5 inch DSI Touch Screen V1.1
- Linux input driver (fysetc_touch) for the touch controller of the FYSETC
- Raspberry Pi 5 inch DSI Touch Screen MIPI LCD V1.1. The screen emulates the
- official Raspberry Pi 7" touchscreen, but its I2C touch proxy does not answer
- FT5x06 multi-byte reads correctly, which causes ghost touches with edt_ft5x06
- and wrong coordinates with rpi-ft5406.
+Description: Touch and backlight drivers for the FYSETC 5 inch DSI Touch Screen V1.1
+ Kernel drivers for the FYSETC Raspberry Pi 5 inch DSI Touch Screen MIPI LCD
+ V1.1, which emulates the official Raspberry Pi 7" touchscreen:
+  - fysetc_touch: touch controller (I2C 0x38), without the ghost touches of
+    edt_ft5x06 and the wrong coordinates of rpi-ft5406;
+  - fysetc_sleep: panel controller and backlight (I2C 0x45), so the screen
+    wakes up after sleep. The backlight is on/off: brightness below 30% is off.
  .
- The module is built on the device for every installed Raspberry Pi kernel
+ The modules are built on the device for every installed Raspberry Pi kernel
  and rebuilt automatically by a kernel hook when a new kernel is installed.
  .
- This package blacklists edt_ft5x06, so the official Raspberry Pi
- touchscreen (and other FT5x06 touchscreens) will not work while it is
- installed.
+ This package blacklists edt_ft5x06 and rpi_panel_attiny_regulator, so the
+ official Raspberry Pi 7" display and other FT5x06 touchscreens will not work
+ correctly while it is installed. If the modules cannot be built for a kernel
+ (for example, without its headers), that kernel boots without video on the
+ DSI screen.

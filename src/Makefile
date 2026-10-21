@@ -1,4 +1,4 @@
-obj-m += fysetc_touch.o
+obj-m += fysetc_touch.o fysetc_sleep.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 

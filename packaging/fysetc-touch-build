@@ -1,16 +1,18 @@
 #!/bin/sh
-# Builds and installs the fysetc_touch module for Raspberry Pi kernels.
+# Builds and installs the fysetc_touch and fysetc_sleep modules for
+# Raspberry Pi kernels.
 #
 #   fysetc-touch-build build [KVER...]   build for KVER (default: every
 #                                        installed Raspberry Pi kernel)
-#   fysetc-touch-build remove [KVER...]  remove the module (default: all)
-#   fysetc-touch-build status            show where the module is installed
+#   fysetc-touch-build remove [KVER...]  remove the modules (default: all)
+#   fysetc-touch-build status            show where the modules are installed
 #
 # Never exits with an error from build/remove: a failed build must not break
 # apt. Failures are reported on stderr and logged in /var/log/fysetc-touch/.
 set -u
 
 SRC=/usr/src/fysetc-touch
+MODULES="fysetc_touch fysetc_sleep"
 MODDIR=updates/fysetc_touch
 LOGDIR=/var/log/fysetc-touch
 
@@ -23,11 +25,88 @@ is_rpi_kernel() {
     esac
 }
 
-rpi_kernels() {
-    for d in /lib/modules/*; do
-        k=${d##*/}
-        is_rpi_kernel "$k" && echo "$k"
+# Records a failed step for KVER: the DETAIL file if given, else the step name.
+log_failure() {
+    fail_kver=$1 fail_step=$2 fail_detail=${3:-}
+    fail_log=$LOGDIR/build-$fail_kver.log
+    mkdir -p "$LOGDIR"
+    if [ -n "$fail_detail" ] && [ -f "$fail_detail" ]; then
+        cp "$fail_detail" "$fail_log"
+    else
+        echo "$fail_step failed" > "$fail_log"
+    fi
+    log "$fail_step FAILED for $fail_kver, see $fail_log"
+}
+
+discard_temp() {
+    for m in $MODULES; do
+        rm -rf "$1/.$m.ko.new" "$1/.$m.ko.old"
     done
+}
+
+# Puts the previous module set back. A .old link exists only for a module that
+# was installed before, so this is right whatever step failed: a module that
+# was not replaced yet still matches its .old link, which is just dropped.
+# Returns 1 if any module could not be restored.
+restore_previous() {
+    restore_failed=0
+    for m in $MODULES; do
+        old=$1/.$m.ko.old cur=$1/$m.ko
+        if [ ! -f "$old" ]; then
+            rm -f "$cur" || restore_failed=1
+        elif cmp -s "$old" "$cur"; then
+            rm -f "$old" || restore_failed=1
+        else
+            mv -f "$old" "$cur" || restore_failed=1
+        fi
+    done
+    return $restore_failed
+}
+
+# Returns 0 when the previous set is back, 1 when it could not be restored.
+# A mixed set is not repaired here: the next successful build replaces it.
+rollback() {
+    if restore_previous "$1"; then
+        discard_temp "$1"
+        return 0
+    fi
+    echo "rollback incomplete in $1: the installed module set may be mixed until the next successful build" >&2
+    return 1
+}
+
+# Installs the whole module set or keeps the previous one: the new set is
+# staged and the current one kept as hard links before anything is replaced.
+# Returns 0 on success, 1 if the previous set was kept, 2 if the rollback
+# itself failed (modules or module index).
+install_modules() {
+    inst_kver=$1 inst_built=$2
+    dest=/lib/modules/$inst_kver/$MODDIR
+
+    mkdir -p "$dest" || return 1
+    discard_temp "$dest"
+    for m in $MODULES; do
+        if ! install -m 0644 "$inst_built/$m.ko" "$dest/.$m.ko.new" ||
+            { [ -f "$dest/$m.ko" ] && ! ln -f "$dest/$m.ko" "$dest/.$m.ko.old"; }; then
+            discard_temp "$dest"
+            return 1
+        fi
+    done
+
+    for m in $MODULES; do
+        if ! mv -f "$dest/.$m.ko.new" "$dest/$m.ko"; then
+            rollback "$dest" || return 2
+            return 1
+        fi
+    done
+    if ! depmod -a "$inst_kver"; then
+        rollback "$dest" || return 2
+        if ! depmod -a "$inst_kver"; then
+            echo "depmod failed again after the rollback: the module index of $inst_kver may be stale" >&2
+            return 2
+        fi
+        return 1
+    fi
+    discard_temp "$dest"
 }
 
 build_one() {
@@ -40,31 +119,69 @@ build_one() {
         return 0
     fi
 
-    tmp=$(mktemp -d) || return 0
-    cp "$SRC"/fysetc_touch.c "$SRC"/Makefile "$tmp"/
-    if make -C "/lib/modules/$kver/build" M="$tmp" modules >"$tmp/make.log" 2>&1; then
-        install -D -m 0644 "$tmp/fysetc_touch.ko" "/lib/modules/$kver/$MODDIR/fysetc_touch.ko"
-        depmod -a "$kver"
-        log "built for $kver"
+    if ! tmp=$(mktemp -d); then
+        log_failure "$kver" setup
+        return 0
+    fi
+    if ! cp "$SRC"/*.c "$SRC"/Makefile "$tmp"/ 2>"$tmp/setup.log"; then
+        log_failure "$kver" setup "$tmp/setup.log"
+    elif ! make -C "/lib/modules/$kver/build" M="$tmp" modules >"$tmp/make.log" 2>&1; then
+        log_failure "$kver" build "$tmp/make.log"
     else
-        mkdir -p "$LOGDIR"
-        cp "$tmp/make.log" "$LOGDIR/build-$kver.log"
-        log "build FAILED for $kver, see $LOGDIR/build-$kver.log"
+        install_modules "$kver" "$tmp" 2>"$tmp/install.log"
+        case $? in
+            0)
+                rm -f "$LOGDIR/build-$kver.log"
+                log "built for $kver"
+                ;;
+            2) log_failure "$kver" "install and rollback" "$tmp/install.log" ;;
+            *) log_failure "$kver" install "$tmp/install.log" ;;
+        esac
     fi
     rm -rf "$tmp"
+    return 0
+}
+
+all_installed() {
+    for m in $MODULES; do
+        [ -f "/lib/modules/$1/$MODDIR/$m.ko" ] || return 1
+    done
     return 0
 }
 
 remove_one() {
     kver=$1
     if [ -d "/lib/modules/$kver/$MODDIR" ]; then
-        rm -rf "/lib/modules/$kver/$MODDIR"
-        rmdir --ignore-fail-on-non-empty "/lib/modules/$kver/updates" 2>/dev/null || true
-        [ -d "/lib/modules/$kver/kernel" ] && depmod -a "$kver"
-        log "removed from $kver"
+        if ! rm -rf "/lib/modules/$kver/$MODDIR"; then
+            log "remove FAILED for $kver: /lib/modules/$kver/$MODDIR is left"
+        else
+            rmdir --ignore-fail-on-non-empty "/lib/modules/$kver/updates" 2>/dev/null || true
+            if [ -d "/lib/modules/$kver/kernel" ] && ! depmod -a "$kver"; then
+                log "depmod FAILED for $kver after removal"
+            fi
+            log "removed from $kver"
+        fi
     fi
     rm -f "$LOGDIR/build-$kver.log"
     return 0
+}
+
+status_one() {
+    kver=$1
+    failure_log=$LOGDIR/build-$kver.log
+    if all_installed "$kver" && [ -f "$failure_log" ]; then
+        s="installed (last build failed: $failure_log)"
+    elif all_installed "$kver"; then
+        s=installed
+    elif [ -f "$failure_log" ]; then
+        s="failed ($failure_log)"
+    elif [ ! -e "/lib/modules/$kver/build/Makefile" ]; then
+        s="no headers"
+    else
+        s="not built"
+    fi
+    [ "$kver" = "$(uname -r)" ] && kver="$kver (running)"
+    echo "$kver: $s"
 }
 
 cmd=${1:-status}
@@ -72,29 +189,23 @@ cmd=${1:-status}
 
 case "$cmd" in
     build)
-        [ $# -eq 0 ] && set -- $(rpi_kernels)
-        for k in "$@"; do build_one "$k"; done
+        if [ $# -eq 0 ]; then
+            for d in /lib/modules/*; do build_one "${d##*/}"; done
+        else
+            for k in "$@"; do build_one "$k"; done
+        fi
         ;;
     remove)
         if [ $# -eq 0 ]; then
-            set -- $(ls /lib/modules)
+            for d in /lib/modules/*; do remove_one "${d##*/}"; done
+        else
+            for k in "$@"; do remove_one "$k"; done
         fi
-        for k in "$@"; do remove_one "$k"; done
         rmdir "$LOGDIR" 2>/dev/null || true
         ;;
     status)
-        for k in $(rpi_kernels); do
-            if [ -f "/lib/modules/$k/$MODDIR/fysetc_touch.ko" ]; then
-                s=installed
-            elif [ -f "$LOGDIR/build-$k.log" ]; then
-                s="build failed ($LOGDIR/build-$k.log)"
-            elif [ ! -e "/lib/modules/$k/build/Makefile" ]; then
-                s="no headers"
-            else
-                s="not built"
-            fi
-            [ "$k" = "$(uname -r)" ] && k="$k (running)"
-            echo "$k: $s"
+        for d in /lib/modules/*; do
+            is_rpi_kernel "${d##*/}" && status_one "${d##*/}"
         done
         ;;
     *)

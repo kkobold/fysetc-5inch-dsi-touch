@@ -1,3 +1,13 @@
+fysetc-5inch-dsi-touch (0.2.0) bookworm; urgency=medium
+
+  * Backlight driver fysetc_sleep: the screen wakes up after sleep.
+    Brightness is on/off (below 30% off), and replaces
+    rpi_panel_attiny_regulator, also in the initramfs.
+  * The package is arm64.
+  * The kernel modules are licensed GPL-2.0.
+
+ -- kkobold <sabbaghdanilo@gmail.com>  Wed, 21 Oct 2026 11:56:08 -0300
+
 fysetc-5inch-dsi-touch (0.1.0) bookworm; urgency=medium
 
   * Initial release: fysetc_touch driver, kernel hooks and edt_ft5x06 blacklist.

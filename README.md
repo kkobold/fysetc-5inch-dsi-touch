@@ -1,15 +1,21 @@
 # fysetc-5inch-dsi-touch
 
-Touch driver for the **FYSETC Raspberry Pi 5 inch DSI Touch Screen MIPI LCD V1.1** on current Raspberry Pi OS, shipped as a `.deb` package.
+Touch and backlight drivers for the **FYSETC Raspberry Pi 5 inch DSI Touch Screen MIPI LCD V1.1** on Raspberry Pi OS Bookworm, shipped as a `.deb` package.
 
 > [!WARNING]
 > **This screen impersonates the official Raspberry Pi 7" touchscreen.**
 > The FYSETC video controller and touch controller emulate the official DSI hardware and identify themselves exactly like it. There is no unique ID to tell them apart.
-> Because of that, this package **disables the stock driver (`edt_ft5x06`)**. While it is installed, **touch on the official 7" display and on other FT5x06 touchscreens will not work**. The two cannot work on the same system. Only install it if you use the FYSETC screen.
+> Because of that, this package **disables the stock drivers (`edt_ft5x06` and `rpi_panel_attiny_regulator`)**. While it is installed, **the official 7" display will not work correctly, and other FT5x06 touchscreens will not work**. The two cannot work on the same system. Only install it if you use the FYSETC screen.
+>
+> The stock drivers stay disabled even if the modules cannot be built for a kernel (for example, a new kernel without its headers). That kernel then boots **without video on the DSI screen**; see [Troubleshooting](#troubleshooting).
 
-## The problem
+## The problems
 
-After recent Raspberry Pi OS updates (6.x kernels), the FYSETC video keeps working, but touch does not:
+After recent Raspberry Pi OS updates (6.x kernels), the FYSETC video keeps working, but the touch and the backlight do not.
+
+### Touch
+
+With the stock drivers:
 
 - **With the modern driver (`edt_ft5x06`)**, there is a continuous stream of ghost touches, even when nobody touches the screen.
 - **With the legacy firmware path (`rpi-ft5406`)**, the ghost touches go away, but the coordinates are wrong, mostly on Y.
@@ -21,7 +27,13 @@ The cause is in the hardware. An MCU on the FYSETC board answers at I²C address
 
 The stock drivers read long blocks and get misaligned data. That is why no calibration, Xorg, libinput or KlipperScreen tweak can fix it.
 
+### Backlight
+
+After the screen goes to sleep, it stays dark. The panel controller at `0x45` only turns the backlight on with `0xff` and ignores any other brightness, which the stock driver (`rpi_panel_attiny_regulator`) writes.
+
 ## The fix
+
+### Touch: `fysetc_touch`
 
 The `fysetc_touch` kernel module talks to the controller the way it actually works:
 
@@ -30,23 +42,29 @@ The `fysetc_touch` kernel module talks to the controller the way it actually wor
 - it validates the alignment on every read and corrects it if it changes;
 - it honours the overlay's `touchscreen-*` properties (size, inversion, swap) and registers a standard Linux multi-touch touchscreen, which libinput, Xorg and KlipperScreen pick up with no extra configuration.
 
-The module is built on the Pi itself, for every installed Raspberry Pi kernel (Raspberry Pi OS ships both `rpi-v8` and `rpi-2712`, so the same package covers the Pi 3, 4 and 5 kernels). A kernel hook rebuilds it automatically whenever `apt` installs a new kernel. A failed build is logged and never breaks `apt`.
+### Backlight: `fysetc_sleep`
+
+The `fysetc_sleep` kernel module replaces `rpi_panel_attiny_regulator` at `0x45` with an on/off backlight. Brightness keeps the `0`–`255` range: below 30% (`0`–`76`) is off, `77`–`255` is on at full brightness. Touch keeps working while the backlight is off.
+
+### Packaging
+
+The modules are built on the Pi itself, for every installed Raspberry Pi kernel (Raspberry Pi OS ships both `rpi-v8` and `rpi-2712`, so the same package covers the Pi 3, 4 and 5 kernels). A kernel hook rebuilds them automatically whenever `apt` installs a new kernel. A failed build is logged and never breaks `apt`.
 
 The package only adds:
 
-- the module source in `/usr/src/fysetc-touch/`;
+- the module sources in `/usr/src/fysetc-touch/`;
 - the `fysetc-touch-build` tool and the kernel hooks in `/etc/kernel/{header_postinst.d,postinst.d,postrm.d}/fysetc-touch`;
-- the built module in `/lib/modules/<kernel>/updates/fysetc_touch/`;
-- `/lib/modprobe.d/fysetc-touch.conf`, which blacklists `edt_ft5x06`.
+- the built modules in `/lib/modules/<kernel>/updates/fysetc_touch/`;
+- `/lib/modprobe.d/fysetc-touch.conf`, which blacklists `edt_ft5x06` and `rpi_panel_attiny_regulator`.
 
-It does not modify any system file, and removing the package deletes all of the above. You edit `config.txt` yourself (step 2).
+It also regenerates the initramfs on install and removal. It does not modify any other system file, and removing the package deletes all of the above. You edit `config.txt` yourself (step 2).
 
 ## Requirements
 
-- Raspberry Pi OS **Bookworm 64-bit** (arm64).
+- Raspberry Pi OS **Bookworm 64-bit** (arm64), kernel 6.1 or newer.
 - Screen connected to the standard DSI connector.
 - Tested on a Raspberry Pi 3 Model B+ with kernel `6.12.109+rpt-rpi-v8`. Other models are untested; reports are welcome.
-- The Raspberry Pi kernel headers (`linux-headers-rpi-v8`, `linux-headers-rpi-2712`) and `make`. `apt` installs them as dependencies; most Raspberry Pi OS images already have them.
+- The Raspberry Pi kernel headers (`linux-headers-rpi-v8`, `linux-headers-rpi-2712`) and `make`. `apt` installs them as dependencies; most Raspberry Pi OS images already have them. Keep the headers installed: every new kernel needs its headers to build the modules.
 
 ## Installation
 
@@ -55,12 +73,12 @@ It does not modify any system file, and removing the package deletes all of the 
 Get the latest `.deb` from [Releases](https://github.com/kkobold/fysetc-5inch-dsi-touch/releases):
 
 ```bash
-VERSION=0.1.0
-wget https://github.com/kkobold/fysetc-5inch-dsi-touch/releases/download/v${VERSION}/fysetc-5inch-dsi-touch_${VERSION}_all.deb
-sudo apt install ./fysetc-5inch-dsi-touch_${VERSION}_all.deb
+VERSION=0.2.0
+wget https://github.com/kkobold/fysetc-5inch-dsi-touch/releases/download/v${VERSION}/fysetc-5inch-dsi-touch_${VERSION}_arm64.deb
+sudo apt install ./fysetc-5inch-dsi-touch_${VERSION}_arm64.deb
 ```
 
-The installation builds the module on the Pi for each installed kernel, which takes a few seconds per kernel. Check the result with:
+The installation builds the modules on the Pi for each installed kernel, which takes a few seconds per kernel, and regenerates the initramfs. Check the result with:
 
 ```bash
 sudo fysetc-touch-build status
@@ -103,9 +121,10 @@ After boot:
 ```bash
 dmesg | grep fysetc_touch
 grep -A4 'FYSETC 5inch DSI Touch' /proc/bus/input/devices
+ls -l /sys/bus/i2c/devices/*-0045/driver
 ```
 
-The input device should show up as **`FYSETC 5inch DSI Touch`**. To watch raw events: `sudo evtest`.
+The input device should show up as **`FYSETC 5inch DSI Touch`**, and the `0x45` driver should be **`fysetc_sleep`**. To watch raw touch events: `sudo evtest`.
 
 ## Rotation
 
@@ -125,14 +144,21 @@ sudo apt remove fysetc-5inch-dsi-touch
 sudo reboot
 ```
 
-Removal deletes the module, the kernel hooks and the blacklist. `edt_ft5x06` works again on the next boot. Revert the step 2 changes too if you want.
+Removal deletes the modules, the kernel hooks and the blacklist, and regenerates the initramfs. `edt_ft5x06` and `rpi_panel_attiny_regulator` work again on the next boot. Revert the step 2 changes too if you want.
 
 ## Troubleshooting
 
-- **No `FYSETC 5inch DSI Touch` device:** check `dmesg | grep fysetc_touch` and `sudo fysetc-touch-build status`. A `no headers` or `build failed` status means the module was not built for the running kernel. Install the matching `linux-headers-rpi-*` package; the kernel hook rebuilds it automatically.
+- **No video on the DSI screen:** the modules were not built for the running kernel. Log in over SSH and run `sudo fysetc-touch-build status`:
+  - `no headers`: install the matching `linux-headers-rpi-*` package; the kernel hook builds the modules. Then reboot.
+  - `failed (<log>)` or `installed (last build failed: <log>)`: the log shows the build error.
+  - To get the stock drivers back meanwhile: `sudo apt remove fysetc-5inch-dsi-touch` and reboot.
+- **Installation warns `update-initramfs failed`:** until the initramfs is regenerated, the stock panel driver can still load from it, and the screen may stay dark after sleep. Fix the cause (usually a full `/boot`), run `sudo update-initramfs -u -k all` and reboot.
+- **Removal warns `update-initramfs failed`:** run `sudo update-initramfs -u -k all` and reboot; until then the stock drivers stay blacklisted.
+- **No `FYSETC 5inch DSI Touch` device:** check `dmesg | grep fysetc_touch` and `sudo fysetc-touch-build status`, as above.
 - **`no answer at 0x38` or a dead backlight at boot:** check the power supply: `vcgencmd get_throttled` should print `throttled=0x0`; bits `0x1`/`0x10000` mean undervoltage. A weak supply can hang the screen's I²C bus, and only a full power cycle (unplug and replug) recovers it.
 - **Touch on the wrong side or mirrored:** see [Rotation](#rotation).
+- **Screen stays dark after sleep:** if the `0x45` driver is `rpi_touchscreen_attiny`, run `sudo update-initramfs -u -k all` and reboot.
 
 ## License
 
-MIT. The kernel module source is dual-licensed `GPL-2.0 OR MIT`, as Linux kernel modules must be GPL-compatible; see [`LICENSE`](LICENSE).
+MIT, see [`LICENSE`](https://github.com/kkobold/fysetc-5inch-dsi-touch/blob/main/LICENSE). Source files with an `SPDX-License-Identifier` header are licensed as stated in that header; the GPL-2.0 text is in [`COPYING`](https://github.com/kkobold/fysetc-5inch-dsi-touch/blob/main/COPYING). In the installed package, see `/usr/share/doc/fysetc-5inch-dsi-touch/copyright`.

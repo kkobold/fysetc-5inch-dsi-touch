@@ -1,7 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0 OR MIT
+// SPDX-License-Identifier: GPL-2.0
 /*
  * fysetc_touch - touch driver for the FYSETC Raspberry Pi 5 inch DSI Touch
  * Screen MIPI LCD V1.1 (I2C 0x38).
+ *
+ * Based on drivers/input/touchscreen/raspberrypi-ts.c (raspberrypi/linux),
+ * changed by kkobold on 2026-10-05: the firmware buffer was replaced by I2C
+ * reads at 0x38 that follow the FYSETC MCU's read ring (below). The input
+ * setup, polling and point decoding follow raspberrypi-ts.c. Changed on
+ * 2026-10-21: contacts are released when polls keep failing.
  *
  * The screen emulates the official 7" display: an MCU answers at 0x38 with
  * the FT5x06 register map, but multi-byte reads do not follow the standard:
@@ -21,6 +27,10 @@
  * Native orientation matches the official display: both axes are inverted,
  * which the vc4-kms-dsi-7inch overlay already declares by default through
  * touchscreen-inverted-x/y. All transforms come from the DT properties.
+ *
+ * Copyright (C) 2015, 2017 Raspberry Pi
+ * Copyright (C) 2018 Nicolas Saenz Julienne <nsaenzjulienne@suse.de>
+ * Copyright (C) 2026 kkobold
  */
 #include <linux/i2c.h>
 #include <linux/input.h>
@@ -39,12 +49,18 @@
 #define FT_NATIVE_X		800
 #define FT_NATIVE_Y		480
 #define FT_POLL_MS		16
+/*
+ * Consecutive failed polls (read error or ambiguous frame, ~48 ms) after which
+ * every contact is released.
+ */
+#define FT_MAX_FAILED_POLLS	3
 
 struct fysetc_ts {
 	struct i2c_client *client;
 	struct input_dev *input;
 	struct touchscreen_properties prop;
 	unsigned int phase;
+	unsigned int failed_polls;
 };
 
 struct ft_point {
@@ -103,6 +119,21 @@ static int ft_find_phase(u8 raw[][4], int n)
 	return found;
 }
 
+/*
+ * A failed poll keeps the previous contacts; if polls keep failing, they are
+ * released once (INPUT_MT_DROP_UNUSED drops every slot not reported in a frame).
+ */
+static void fysetc_ts_poll_failed(struct fysetc_ts *ts)
+{
+	if (ts->failed_polls >= FT_MAX_FAILED_POLLS)
+		return;
+	if (++ts->failed_polls < FT_MAX_FAILED_POLLS)
+		return;
+
+	input_mt_sync_frame(ts->input);
+	input_sync(ts->input);
+}
+
 static void fysetc_ts_poll(struct input_dev *input)
 {
 	struct fysetc_ts *ts = input_get_drvdata(input);
@@ -114,6 +145,7 @@ static void fysetc_ts_poll(struct input_dev *input)
 	error = ft_read(ts, FT_REG_TD_STATUS, &status, 1);
 	if (error) {
 		dev_err_ratelimited(&ts->client->dev, "TD_STATUS read: %d\n", error);
+		fysetc_ts_poll_failed(ts);
 		return;
 	}
 
@@ -123,6 +155,7 @@ static void fysetc_ts_poll(struct input_dev *input)
 		error = ft_read(ts, FT_REG_P1 + i * FT_POINT_STRIDE, raw[i], 4);
 		if (error) {
 			dev_err_ratelimited(&ts->client->dev, "point %d read: %d\n", i, error);
+			fysetc_ts_poll_failed(ts);
 			return;
 		}
 	}
@@ -136,9 +169,10 @@ static void fysetc_ts_poll(struct input_dev *input)
 		phase = ft_find_phase(raw, n);
 		if (phase < 0) {
 			/* Ambiguous frame: drop it and keep the previous state. */
+			fysetc_ts_poll_failed(ts);
 			return;
 		}
-		dev_info(&ts->client->dev, "ring phase %u -> %d\n", ts->phase, phase);
+		dev_info_ratelimited(&ts->client->dev, "ring phase %u -> %d\n", ts->phase, phase);
 		ts->phase = phase;
 	}
 
@@ -158,6 +192,7 @@ static void fysetc_ts_poll(struct input_dev *input)
 
 	input_mt_sync_frame(input);
 	input_sync(input);
+	ts->failed_polls = 0;
 }
 
 /* Initial phase from the records cached by the proxy (best effort). */
@@ -253,5 +288,8 @@ static struct i2c_driver fysetc_ts_driver = {
 };
 module_i2c_driver(fysetc_ts_driver);
 
+MODULE_AUTHOR("Gordon Hollingworth");
+MODULE_AUTHOR("Nicolas Saenz Julienne <nsaenzjulienne@suse.de>");
+MODULE_AUTHOR("kkobold");
 MODULE_DESCRIPTION("FYSETC Raspberry Pi 5 inch DSI Touch Screen V1.1 touch driver");
-MODULE_LICENSE("Dual MIT/GPL");
+MODULE_LICENSE("GPL v2");

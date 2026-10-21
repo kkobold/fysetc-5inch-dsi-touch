@@ -20,6 +20,5 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-The kernel module source (src/fysetc_touch.c) is dual-licensed under
-"GPL-2.0 OR MIT" (see its SPDX header), as required for Linux kernel
-modules. You may use it under either license.
+Source files with an SPDX-License-Identifier header are licensed as stated
+in that header. The GPL-2.0 text is in COPYING.

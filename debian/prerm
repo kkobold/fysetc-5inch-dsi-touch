@@ -3,6 +3,7 @@ set -e
 
 if [ "$1" = "remove" ]; then
     modprobe -r fysetc_touch 2>/dev/null || true
+    # fysetc_sleep powers the display, so it stays loaded until the next boot.
     fysetc-touch-build remove
 fi
 
